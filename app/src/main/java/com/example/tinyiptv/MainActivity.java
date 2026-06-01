@@ -178,13 +178,34 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    @Override
+@Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             int code = event.getKeyCode();
-            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP) { playChannel((currentIdx - 1 + channels.size()) % channels.size()); return true; }
-            if (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN) { playChannel((currentIdx + 1) % channels.size()); return true; }
+
+            // Кнопки "Вперед" / "Следующий"
+            if (code == KeyEvent.KEYCODE_DPAD_UP || 
+                code == KeyEvent.KEYCODE_DPAD_RIGHT ||
+                code == KeyEvent.KEYCODE_CHANNEL_UP || 
+                code == KeyEvent.KEYCODE_MEDIA_NEXT || 
+                code == KeyEvent.KEYCODE_PAGE_UP) {
+                
+                playChannel((currentIdx + 1) % channels.size());
+                return true; 
+            }
+
+            // Кнопки "Назад" / "Предыдущий"
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN || 
+                code == KeyEvent.KEYCODE_DPAD_LEFT ||
+                code == KeyEvent.KEYCODE_CHANNEL_DOWN || 
+                code == KeyEvent.KEYCODE_MEDIA_PREVIOUS || 
+                code == KeyEvent.KEYCODE_PAGE_DOWN) {
+                
+                playChannel((currentIdx - 1 + channels.size()) % channels.size());
+                return true;
+            }
         }
+        // Если это кнопка громкости или любая другая — отдаем её системе (стандартное поведение)
         return super.dispatchKeyEvent(event);
     }
 
