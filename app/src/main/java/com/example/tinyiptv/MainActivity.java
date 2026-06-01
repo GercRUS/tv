@@ -26,24 +26,25 @@ public class MainActivity extends AppCompatActivity {
     private int currentIdx = 0;
     private SharedPreferences prefs;
 
-    private final ActivityResultLauncher<String> filePicker = registerForActivityResult(
-            new ActivityResultContracts.GetContent(), uri -> {
+    // Используем OpenDocument вместо GetContent для постоянного доступа
+    private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(
+            new ActivityResultContracts.OpenDocument(), uri -> {
                 if (uri != null) {
                     try {
-                        getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    } catch (Exception ignored) {}
-                    loadPlaylist(uri);
+                        getContentResolver().takePersistableUriPermission(uri, 
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        loadPlaylist(uri);
+                    } catch (Exception e) {
+                        loadPlaylist(uri); // Для старых версий
+                    }
                 }
             });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
-        // Убираем заголовок окна
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.activity_main);
-        
         hideSystemUI();
 
         prefs = getPreferences(MODE_PRIVATE);
@@ -53,20 +54,20 @@ public class MainActivity extends AppCompatActivity {
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
 
-        // Слушатель ошибок
         player.addListener(new Player.Listener() {
             @Override
             public void onPlayerError(PlaybackException error) {
-                String msg = "Ошибка: ";
-                if (error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND) msg += "Файл не найден";
-                else if (error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED) msg += "Нет сети";
-                else msg += error.getLocalizedMessage();
-                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+                String errorType = "Ошибка источника: ";
+                if (error.errorCode == PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED) 
+                    errorType = "HTTP запрещен (нужен HTTPS): ";
+                
+                Toast.makeText(MainActivity.this, errorType + error.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
             }
         });
 
         findViewById(R.id.btn_url).setOnClickListener(v -> showUrlDialog());
-        findViewById(R.id.btn_file).setOnClickListener(v -> filePicker.launch("*/*"));
+        // Запрашиваем m3u файлы
+        findViewById(R.id.btn_file).setOnClickListener(v -> filePicker.launch(new String[]{"*/*"}));
 
         initTouchLogic();
 
@@ -78,7 +79,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Полный экран без полосок
     private void hideSystemUI() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);
@@ -95,17 +95,22 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Обработка физических кнопок (вперед/назад)
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemUI();
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             int code = event.getKeyCode();
-            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP || code == KeyEvent.KEYCODE_MEDIA_NEXT) {
-                playChannel((currentIdx + 1) % channels.size());
+            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP) {
+                playChannel((currentIdx - 1 + channels.size()) % channels.size());
                 return true;
             }
-            if (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
-                playChannel((currentIdx - 1 + channels.size()) % channels.size());
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN) {
+                playChannel((currentIdx + 1) % channels.size());
                 return true;
             }
         }
@@ -113,41 +118,37 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadPlaylist(Uri uri) {
-        prefs.edit().putString("last_playlist", uri.toString()).apply();
         new Thread(() -> {
             List<String[]> tmp = new ArrayList<>();
             try (InputStream is = getContentResolver().openInputStream(uri);
                  BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
-                String line, name = "Unknown";
+                String line, name = "Канал";
                 while ((line = br.readLine()) != null) {
                     line = line.trim();
                     if (line.startsWith("#EXTINF")) {
                         int comma = line.lastIndexOf(",");
                         if (comma != -1) name = line.substring(comma + 1);
-                    } else if (!line.isEmpty() && !line.startsWith("#")) {
+                    } else if (line.startsWith("http") || line.startsWith("rtsp") || line.startsWith("rtmp")) {
                         tmp.add(new String[]{name, line});
                     }
                 }
+                
+                runOnUiThread(() -> {
+                    channels = tmp;
+                    updateList();
+                    prefs.edit().putString("last_playlist", uri.toString()).apply();
+                    if (!channels.isEmpty()) playChannel(prefs.getInt("last_idx", 0));
+                });
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Ошибка чтения M3U", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(this, "Файл недоступен или поврежден", Toast.LENGTH_SHORT).show());
             }
-            
-            runOnUiThread(() -> {
-                channels = tmp;
-                updateList();
-                if (!channels.isEmpty()) {
-                    int lastIdx = prefs.getInt("last_idx", 0);
-                    playChannel(lastIdx < channels.size() ? lastIdx : 0);
-                }
-            });
         }).start();
     }
 
     private void playChannel(int idx) {
         if (channels.isEmpty()) return;
-        currentIdx = idx;
-        MediaItem mediaItem = MediaItem.fromUri(channels.get(currentIdx)[1]);
-        player.setMediaItem(mediaItem);
+        currentIdx = idx % channels.size();
+        player.setMediaItem(MediaItem.fromUri(channels.get(currentIdx)[1]));
         player.prepare();
         player.play();
         prefs.edit().putInt("last_idx", currentIdx).apply();
@@ -169,12 +170,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
                 if (channels.isEmpty()) return false;
-                if (Math.abs(vY) > Math.abs(vX)) {
-                    if (vY > 0) playChannel((currentIdx - 1 + channels.size()) % channels.size());
-                    else playChannel((currentIdx + 1) % channels.size());
-                    return true;
-                }
-                return false;
+                if (vY > 0) playChannel((currentIdx - 1 + channels.size()) % channels.size());
+                else playChannel((currentIdx + 1) % channels.size());
+                return true;
             }
             @Override
             public boolean onSingleTapConfirmed(MotionEvent e) {
@@ -193,8 +191,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void showUrlDialog() {
         EditText input = new EditText(this);
-        new AlertDialog.Builder(this).setTitle("Вставь URL").setView(input)
-            .setPositiveButton("OK", (d, w) -> loadPlaylist(Uri.parse(input.getText().toString().trim()))).show();
+        new AlertDialog.Builder(this).setTitle("Ссылка на M3U").setView(input)
+            .setPositiveButton("OK", (d, w) -> {
+                String url = input.getText().toString().trim();
+                if (!url.isEmpty()) loadPlaylist(Uri.parse(url));
+            }).show();
     }
 
     @Override protected void onResume() { super.onResume(); hideSystemUI(); player.play(); }
