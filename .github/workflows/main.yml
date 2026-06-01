@@ -10,7 +10,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # Эта команда очистит файлы от невидимых символов Windows (BOM)
       - name: Strip BOM from all files
         run: find . -type f -name "*.gradle" -o -name "*.java" -o -name "*.xml" | xargs sed -i '1s/^\xef\xbb\xbf//'
       
@@ -24,11 +23,13 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
         
+      # МЕНЯЕМ assembleRelease на assembleDebug
       - name: Build with Gradle
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleDebug
         
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: my-iptv-app
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          # МЕНЯЕМ путь к файлу на debug
+          path: app/build/outputs/apk/debug/app-debug.apk
