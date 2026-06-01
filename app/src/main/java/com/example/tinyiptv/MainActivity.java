@@ -129,30 +129,54 @@ public class MainActivity extends AppCompatActivity {
                 }
             }).show();
     }
-
-    private void loadPlaylist(Uri uri) {
+    
+private void loadPlaylist(Uri uri) {
         new Thread(() -> {
             List<String[]> tmp = new ArrayList<>();
-            try (InputStream is = getContentResolver().openInputStream(uri);
-                 BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
-                String line, name = "Канал";
-                while ((line = br.readLine()) != null) {
-                    line = line.trim();
-                    if (line.startsWith("#EXTINF")) {
-                        int comma = line.lastIndexOf(",");
-                        if (comma != -1) name = line.substring(comma + 1);
-                    } else if (line.startsWith("http") || line.startsWith("rtsp") || line.startsWith("rtmp")) {
-                        tmp.add(new String[]{name, line});
-                    }
+            InputStream is = null;
+            try {
+                // Если ссылка из интернета
+                if (uri.toString().startsWith("http")) {
+                    java.net.URL url = new java.net.URL(uri.toString());
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setConnectTimeout(5000);
+                    is = conn.getInputStream();
+                } else {
+                    // Если локальный файл
+                    is = getContentResolver().openInputStream(uri);
                 }
+
+                if (is != null) {
+                    BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                    String line, name = "Канал";
+                    while ((line = br.readLine()) != null) {
+                        line = line.trim();
+                        if (line.startsWith("#EXTINF")) {
+                            int comma = line.lastIndexOf(",");
+                            if (comma != -1) name = line.substring(comma + 1);
+                        } else if (line.startsWith("http") || line.startsWith("rtsp") || line.startsWith("rtmp")) {
+                            tmp.add(new String[]{name, line});
+                        }
+                    }
+                    br.close();
+                }
+
                 runOnUiThread(() -> {
+                    if (tmp.isEmpty()) {
+                        Toast.makeText(this, "Плейлист пуст или недоступен", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     channels = tmp;
                     updateList();
                     prefs.edit().putString("last_playlist", uri.toString()).apply();
                     if (!channels.isEmpty()) playChannel(prefs.getInt("last_idx", 0));
                 });
+
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Ошибка M3U", Toast.LENGTH_SHORT).show());
+                e.printStackTrace();
+                runOnUiThread(() -> Toast.makeText(this, "Ошибка загрузки: " + e.getLocalizedMessage(), Toast.LENGTH_SHORT).show());
+            } finally {
+                try { if (is != null) is.close(); } catch (Exception ignored) {}
             }
         }).start();
     }
