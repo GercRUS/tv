@@ -1,15 +1,19 @@
-﻿package com.example.tinyiptv;
+package com.example.tinyiptv;
+
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.*;
 import android.widget.*;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
 import com.google.android.exoplayer2.*;
 import com.google.android.exoplayer2.ui.StyledPlayerView;
 import java.io.*;
-import java.net.URL;
 import java.util.*;
 
 public class MainActivity extends AppCompatActivity {
@@ -20,6 +24,11 @@ public class MainActivity extends AppCompatActivity {
     private int currentIdx = 0;
     private SharedPreferences prefs;
 
+    private final ActivityResultLauncher<String> filePicker = registerForActivityResult(
+            new ActivityResultContracts.GetContent(), uri -> {
+                if (uri != null) loadPlaylist(uri);
+            });
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -29,41 +38,53 @@ public class MainActivity extends AppCompatActivity {
         drawer = findViewById(R.id.drawer_layout);
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
-        findViewById(R.id.btn_settings).setOnClickListener(v -> showUrlDialog());
+
+        findViewById(R.id.btn_url).setOnClickListener(v -> showUrlDialog());
+        findViewById(R.id.btn_file).setOnClickListener(v -> filePicker.launch("*/*"));
+
         setupGestures();
-        String lastUrl = prefs.getString("url", "");
-        if(!lastUrl.isEmpty()) loadPlaylist(lastUrl);
+
+        String lastPath = prefs.getString("last_playlist", "");
+        if (!lastPath.isEmpty()) {
+            loadPlaylist(Uri.parse(lastPath));
+        } else {
+            drawer.openDrawer(Gravity.LEFT); // Сразу открываем меню, если пусто
+        }
     }
 
-    private void loadPlaylist(String urlPath) {
+    private void loadPlaylist(Uri uri) {
+        prefs.edit().putString("last_playlist", uri.toString()).apply();
         new Thread(() -> {
-            try {
-                Scanner s = new Scanner(new URL(urlPath).openStream());
-                List<String[]> tmp = new ArrayList<>();
-                while (s.hasNextLine()) {
-                    String line = s.nextLine();
+            List<String[]> tmp = new ArrayList<>();
+            try (InputStream is = getContentResolver().openInputStream(uri);
+                 BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
+                String line, name = "Unknown";
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
                     if (line.startsWith("#EXTINF")) {
-                        String name = line.substring(line.lastIndexOf(",") + 1);
-                        if (s.hasNextLine()) tmp.add(new String[]{name, s.nextLine()});
+                        int comma = line.lastIndexOf(",");
+                        name = (comma != -1) ? line.substring(comma + 1) : "Channel";
+                    } else if (line.startsWith("http") || line.startsWith("rtmp")) {
+                        tmp.add(new String[]{name, line});
                     }
                 }
-                runOnUiThread(() -> {
-                    channels = tmp;
-                    updateList();
-                    playChannel(prefs.getInt("last_idx", 0));
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Ошибка плейлиста", Toast.LENGTH_SHORT).show());
-            }
+            } catch (Exception e) { e.printStackTrace(); }
+            
+            runOnUiThread(() -> {
+                channels = tmp;
+                updateList();
+                if (!channels.isEmpty()) playChannel(prefs.getInt("last_idx", 0));
+            });
         }).start();
     }
 
     private void playChannel(int idx) {
-        if (channels.isEmpty() || idx >= channels.size()) return;
-        currentIdx = idx;
-        player.setMediaItem(MediaItem.fromUri(channels.get(idx)[1]));
-        player.prepare(); player.play();
-        prefs.edit().putInt("last_idx", idx).apply();
+        if (channels.isEmpty()) return;
+        currentIdx = (idx < 0 || idx >= channels.size()) ? 0 : idx;
+        player.setMediaItem(MediaItem.fromUri(channels.get(currentIdx)[1]));
+        player.prepare();
+        player.play();
+        prefs.edit().putInt("last_idx", currentIdx).apply();
     }
 
     private void updateList() {
@@ -79,9 +100,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
                 if (channels.isEmpty()) return false;
-                if (vY > 0) playChannel((currentIdx + 1) % channels.size());
-                else playChannel((currentIdx - 1 + channels.size()) % channels.size());
-                return true;
+                if (Math.abs(vY) > Math.abs(vX)) {
+                    playChannel((vY > 0) ? (currentIdx + 1) % channels.size() : (currentIdx - 1 + channels.size()) % channels.size());
+                    return true;
+                }
+                return false;
             }
         });
         playerView.setOnTouchListener((v, event) -> gd.onTouchEvent(event));
@@ -89,12 +112,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void showUrlDialog() {
         EditText input = new EditText(this);
-        input.setText(prefs.getString("url", ""));
-        new AlertDialog.Builder(this).setTitle("M3U URL").setView(input).setPositiveButton("OK", (d, w) -> {
-            String url = input.getText().toString();
-            prefs.edit().putString("url", url).apply();
-            loadPlaylist(url);
-        }).show();
+        new AlertDialog.Builder(this).setTitle("URL плейлиста").setView(input)
+            .setPositiveButton("OK", (d, w) -> loadPlaylist(Uri.parse(input.getText().toString()))).show();
     }
 
     @Override protected void onDestroy() { super.onDestroy(); player.release(); }
