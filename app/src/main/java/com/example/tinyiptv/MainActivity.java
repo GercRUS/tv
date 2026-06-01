@@ -49,16 +49,11 @@ public class MainActivity extends AppCompatActivity {
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
 
-        player.addListener(new Player.Listener() {
-            @Override
-            public void onPlayerError(PlaybackException error) {
-                Toast.makeText(MainActivity.this, "Ошибка: " + error.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
-            }
-        });
-
         findViewById(R.id.btn_settings).setOnClickListener(v -> showSettingsDialog());
 
-        initTouchLogic();
+        // Вешаем жесты на прозрачный слой
+        View gestureLayer = findViewById(R.id.gesture_layer);
+        initGestures(gestureLayer);
 
         String lastUri = prefs.getString("last_playlist", "");
         if (!lastUri.isEmpty()) {
@@ -68,27 +63,35 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showSettingsDialog() {
-        String[] options = {"Вставить ссылку из буфера", "Ввести URL вручную", "Выбрать локальный файл M3U"};
-        new AlertDialog.Builder(this)
-            .setTitle("Настройки плейлиста")
-            .setItems(options, (dialog, which) -> {
-                if (which == 0) { // Буфер
-                    ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    if (cb.hasPrimaryClip()) {
-                        String text = cb.getPrimaryClip().getItemAt(0).getText().toString();
-                        loadPlaylist(Uri.parse(text.trim()));
-                    } else {
-                        Toast.makeText(this, "Буфер пуст", Toast.LENGTH_SHORT).show();
-                    }
-                } else if (which == 1) { // Вручную
-                    EditText input = new EditText(this);
-                    new AlertDialog.Builder(this).setTitle("URL").setView(input)
-                        .setPositiveButton("OK", (d, w) -> loadPlaylist(Uri.parse(input.getText().toString().trim()))).show();
-                } else if (which == 2) { // Файл
-                    filePicker.launch(new String[]{"*/*"});
+    private void initGestures(View view) {
+        GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
+                if (channels.isEmpty()) return false;
+                // Свайп вертикальный
+                if (Math.abs(vY) > Math.abs(vX)) {
+                    if (vY > 0) playChannel((currentIdx - 1 + channels.size()) % channels.size());
+                    else playChannel((currentIdx + 1) % channels.size());
+                    return true;
                 }
-            }).show();
+                return false;
+            }
+
+            @Override
+            public boolean onSingleTapConfirmed(MotionEvent e) {
+                // Тап в левой трети экрана
+                if (e.getX() < (float) playerView.getWidth() / 3) {
+                    drawer.openDrawer(GravityCompat.START);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        view.setOnTouchListener((v, event) -> {
+            gd.onTouchEvent(event);
+            return true;
+        });
     }
 
     private void playChannel(int idx) {
@@ -102,14 +105,29 @@ public class MainActivity extends AppCompatActivity {
         player.play();
         
         prefs.edit().putInt("last_idx", currentIdx).apply();
-        showChannelName(name);
-    }
-
-    private void showChannelName(String name) {
+        
+        // Показываем название канала
         overlay.setText(name);
         overlay.setVisibility(View.VISIBLE);
         hideHandler.removeCallbacksAndMessages(null);
         hideHandler.postDelayed(() -> overlay.setVisibility(View.GONE), 3000);
+    }
+
+    private void showSettingsDialog() {
+        String[] options = {"Вставить из буфера", "Ввести URL", "Выбрать файл M3U"};
+        new AlertDialog.Builder(this).setTitle("Плейлист")
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) {
+                    ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cb.hasPrimaryClip()) loadPlaylist(Uri.parse(cb.getPrimaryClip().getItemAt(0).getText().toString().trim()));
+                } else if (which == 1) {
+                    EditText input = new EditText(this);
+                    new AlertDialog.Builder(this).setTitle("URL").setView(input)
+                        .setPositiveButton("OK", (d, w) -> loadPlaylist(Uri.parse(input.getText().toString().trim()))).show();
+                } else if (which == 2) {
+                    filePicker.launch(new String[]{"*/*"});
+                }
+            }).show();
     }
 
     private void loadPlaylist(Uri uri) {
@@ -144,31 +162,7 @@ public class MainActivity extends AppCompatActivity {
         List<String> names = new ArrayList<>();
         for (String[] c : channels) names.add(c[0]);
         lv.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, names));
-        lv.setOnItemClickListener((p, v, pos, id) -> {
-            playChannel(pos);
-            drawer.closeDrawer(GravityCompat.START);
-        });
-    }
-
-    private void initTouchLogic() {
-        GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override
-            public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
-                if (channels.isEmpty()) return false;
-                if (vY > 0) playChannel((currentIdx - 1 + channels.size()) % channels.size());
-                else playChannel((currentIdx + 1) % channels.size());
-                return true;
-            }
-            @Override
-            public boolean onSingleTapConfirmed(MotionEvent e) {
-                if (e.getX() < (float) playerView.getWidth() / 3) {
-                    drawer.openDrawer(GravityCompat.START);
-                    return true;
-                }
-                return false;
-            }
-        });
-        playerView.setOnTouchListener((v, event) -> gd.onTouchEvent(event));
+        lv.setOnItemClickListener((p, v, pos, id) -> { playChannel(pos); drawer.closeDrawer(GravityCompat.START); });
     }
 
     private void hideSystemUI() {
