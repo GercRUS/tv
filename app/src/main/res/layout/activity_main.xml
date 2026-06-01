@@ -5,23 +5,68 @@
     android:layout_height="match_parent"
     android:background="#000">
 
-    <com.google.android.exoplayer2.ui.StyledPlayerView
-        android:id="@+id/player_view"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:use_controller="false"
-        app:resize_mode="zoom" />
+        android:layout_height="match_parent">
+
+        <com.google.android.exoplayer2.ui.StyledPlayerView
+            android:id="@+id/player_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:use_controller="false"
+            app:resize_mode="zoom" />
+
+        <!-- Название канала справа сверху -->
+        <TextView
+            android:id="@+id/channel_overlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_margin="20dp"
+            android:padding="8dp"
+            android:background="#88000000"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <com.google.android.material.navigation.NavigationView
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="#DD000000">
-        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="10dp">
-            <Button android:id="@+id/btn_url" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ввести URL" android:layout_marginBottom="5dp"/>
-            <Button android:id="@+id/btn_file" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Выбрать файл M3U" />
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Список каналов:" android:textColor="#FFF" android:padding="10dp"/>
-            <ListView android:id="@+id/channel_list" android:layout_width="match_parent" android:layout_height="match_parent" />
+        android:background="#CC000000">
+
+        <LinearLayout
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="10dp">
+
+            <ImageButton
+                android:id="@+id/btn_settings"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="end"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_preferences"
+                android:scaleType="fitCenter"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Каналы"
+                android:textColor="#88FFFFFF"
+                android:padding="10dp"
+                android:textAllCaps="true" />
+
+            <ListView
+                android:id="@+id/channel_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="#44FFFFFF"
+                android:dividerHeight="1dp" />
         </LinearLayout>
     </com.google.android.material.navigation.NavigationView>
 </androidx.drawerlayout.widget.DrawerLayout>
