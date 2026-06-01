@@ -16,18 +16,24 @@
             app:use_controller="false"
             app:resize_mode="zoom" />
 
-        <!-- Название канала справа сверху -->
+        <!-- ПРОЗРАЧНЫЙ СЛОЙ ДЛЯ ЖЕСТОВ -->
+        <View
+            android:id="@+id/gesture_layer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clickable="true"
+            android:focusable="true" />
+
         <TextView
             android:id="@+id/channel_overlay"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|end"
             android:layout_margin="20dp"
-            android:padding="8dp"
-            android:background="#88000000"
+            android:padding="10dp"
+            android:background="#AA000000"
             android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:textSize="20sp"
             android:visibility="gone" />
     </FrameLayout>
 
@@ -36,37 +42,19 @@
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:background="#CC000000">
-
-        <LinearLayout
-            android:orientation="vertical"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:padding="10dp">
-
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="10dp">
             <ImageButton
                 android:id="@+id/btn_settings"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
                 android:layout_gravity="end"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_preferences"
-                android:scaleType="fitCenter"
-                app:tint="#FFFFFF" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Каналы"
-                android:textColor="#88FFFFFF"
-                android:padding="10dp"
-                android:textAllCaps="true" />
-
+                app:tint="#FFF" />
             <ListView
                 android:id="@+id/channel_list"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:divider="#44FFFFFF"
-                android:dividerHeight="1dp" />
+                android:layout_height="match_parent" />
         </LinearLayout>
     </com.google.android.material.navigation.NavigationView>
 </androidx.drawerlayout.widget.DrawerLayout>
