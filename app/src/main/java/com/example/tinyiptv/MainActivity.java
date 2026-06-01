@@ -1,10 +1,8 @@
 package com.example.tinyiptv;
 
-import android.content.Intent;
-import android.content.SharedPreferences;
+import android.content.*;
 import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
+import android.os.*;
 import android.view.*;
 import android.widget.*;
 import androidx.activity.result.ActivityResultLauncher;
@@ -22,21 +20,17 @@ public class MainActivity extends AppCompatActivity {
     private ExoPlayer player;
     private StyledPlayerView playerView;
     private DrawerLayout drawer;
+    private TextView overlay;
     private List<String[]> channels = new ArrayList<>();
     private int currentIdx = 0;
     private SharedPreferences prefs;
+    private final Handler hideHandler = new Handler(Looper.getMainLooper());
 
-    // Используем OpenDocument вместо GetContent для постоянного доступа
     private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(
             new ActivityResultContracts.OpenDocument(), uri -> {
                 if (uri != null) {
-                    try {
-                        getContentResolver().takePersistableUriPermission(uri, 
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        loadPlaylist(uri);
-                    } catch (Exception e) {
-                        loadPlaylist(uri); // Для старых версий
-                    }
+                    try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+                    loadPlaylist(uri);
                 }
             });
 
@@ -50,6 +44,7 @@ public class MainActivity extends AppCompatActivity {
         prefs = getPreferences(MODE_PRIVATE);
         playerView = findViewById(R.id.player_view);
         drawer = findViewById(R.id.drawer_layout);
+        overlay = findViewById(R.id.channel_overlay);
         
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
@@ -57,17 +52,11 @@ public class MainActivity extends AppCompatActivity {
         player.addListener(new Player.Listener() {
             @Override
             public void onPlayerError(PlaybackException error) {
-                String errorType = "Ошибка источника: ";
-                if (error.errorCode == PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED) 
-                    errorType = "HTTP запрещен (нужен HTTPS): ";
-                
-                Toast.makeText(MainActivity.this, errorType + error.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Ошибка: " + error.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
             }
         });
 
-        findViewById(R.id.btn_url).setOnClickListener(v -> showUrlDialog());
-        // Запрашиваем m3u файлы
-        findViewById(R.id.btn_file).setOnClickListener(v -> filePicker.launch(new String[]{"*/*"}));
+        findViewById(R.id.btn_settings).setOnClickListener(v -> showSettingsDialog());
 
         initTouchLogic();
 
@@ -79,42 +68,48 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void hideSystemUI() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getWindow().setDecorFitsSystemWindows(false);
-            WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN);
-        }
+    private void showSettingsDialog() {
+        String[] options = {"Вставить ссылку из буфера", "Ввести URL вручную", "Выбрать локальный файл M3U"};
+        new AlertDialog.Builder(this)
+            .setTitle("Настройки плейлиста")
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) { // Буфер
+                    ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cb.hasPrimaryClip()) {
+                        String text = cb.getPrimaryClip().getItemAt(0).getText().toString();
+                        loadPlaylist(Uri.parse(text.trim()));
+                    } else {
+                        Toast.makeText(this, "Буфер пуст", Toast.LENGTH_SHORT).show();
+                    }
+                } else if (which == 1) { // Вручную
+                    EditText input = new EditText(this);
+                    new AlertDialog.Builder(this).setTitle("URL").setView(input)
+                        .setPositiveButton("OK", (d, w) -> loadPlaylist(Uri.parse(input.getText().toString().trim()))).show();
+                } else if (which == 2) { // Файл
+                    filePicker.launch(new String[]{"*/*"});
+                }
+            }).show();
     }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) hideSystemUI();
+    private void playChannel(int idx) {
+        if (channels.isEmpty()) return;
+        currentIdx = idx % channels.size();
+        String name = channels.get(currentIdx)[0];
+        String url = channels.get(currentIdx)[1];
+
+        player.setMediaItem(MediaItem.fromUri(url));
+        player.prepare();
+        player.play();
+        
+        prefs.edit().putInt("last_idx", currentIdx).apply();
+        showChannelName(name);
     }
 
-    @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            int code = event.getKeyCode();
-            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP) {
-                playChannel((currentIdx - 1 + channels.size()) % channels.size());
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN) {
-                playChannel((currentIdx + 1) % channels.size());
-                return true;
-            }
-        }
-        return super.dispatchKeyEvent(event);
+    private void showChannelName(String name) {
+        overlay.setText(name);
+        overlay.setVisibility(View.VISIBLE);
+        hideHandler.removeCallbacksAndMessages(null);
+        hideHandler.postDelayed(() -> overlay.setVisibility(View.GONE), 3000);
     }
 
     private void loadPlaylist(Uri uri) {
@@ -132,7 +127,6 @@ public class MainActivity extends AppCompatActivity {
                         tmp.add(new String[]{name, line});
                     }
                 }
-                
                 runOnUiThread(() -> {
                     channels = tmp;
                     updateList();
@@ -140,18 +134,9 @@ public class MainActivity extends AppCompatActivity {
                     if (!channels.isEmpty()) playChannel(prefs.getInt("last_idx", 0));
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Файл недоступен или поврежден", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(this, "Ошибка M3U", Toast.LENGTH_SHORT).show());
             }
         }).start();
-    }
-
-    private void playChannel(int idx) {
-        if (channels.isEmpty()) return;
-        currentIdx = idx % channels.size();
-        player.setMediaItem(MediaItem.fromUri(channels.get(currentIdx)[1]));
-        player.prepare();
-        player.play();
-        prefs.edit().putInt("last_idx", currentIdx).apply();
     }
 
     private void updateList() {
@@ -166,7 +151,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initTouchLogic() {
-        GestureDetector gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+        GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
                 if (channels.isEmpty()) return false;
@@ -183,19 +168,30 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
         });
-        playerView.setOnTouchListener((v, event) -> {
-            gestureDetector.onTouchEvent(event);
-            return true; 
-        });
+        playerView.setOnTouchListener((v, event) -> gd.onTouchEvent(event));
     }
 
-    private void showUrlDialog() {
-        EditText input = new EditText(this);
-        new AlertDialog.Builder(this).setTitle("Ссылка на M3U").setView(input)
-            .setPositiveButton("OK", (d, w) -> {
-                String url = input.getText().toString().trim();
-                if (!url.isEmpty()) loadPlaylist(Uri.parse(url));
-            }).show();
+    private void hideSystemUI() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            int code = event.getKeyCode();
+            if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_CHANNEL_UP) { playChannel((currentIdx - 1 + channels.size()) % channels.size()); return true; }
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_CHANNEL_DOWN) { playChannel((currentIdx + 1) % channels.size()); return true; }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override protected void onResume() { super.onResume(); hideSystemUI(); player.play(); }
