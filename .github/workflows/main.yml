@@ -23,28 +23,12 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
         
+      # Собираем релиз. Подпись подтянется из build.gradle автоматически
       - name: Build Release APK
         run: ./gradlew assembleRelease
         
-      # Создаем временный ключ и подписываем APK
-      - name: Sign APK
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          # Если секреты не настроены, билд не упадет, но и не подпишется. 
-          # Мы сейчас их настроим ниже.
-          BUILD_TOOLS_VERSION: "33.0.1"
-
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
         with:
           name: IPTV-PRO-Release
-          path: app/build/outputs/apk/release/*-unsigned.apk 
-          # На самом деле нам нужен подписанный, но для простоты без секретов 
-          # я дам тебе способ ниже, как сделать это без мучений.
+          path: app/build/outputs/apk/release/*.apk
