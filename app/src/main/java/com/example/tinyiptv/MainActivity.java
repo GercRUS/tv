@@ -84,14 +84,25 @@ private void openSortMode() {
         ItemTouchHelper th = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(
                 ItemTouchHelper.UP | ItemTouchHelper.DOWN | ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT, 0) {
             
-            @Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder target) {
-                int from = vh.getAbsoluteAdapterPosition();
-                int to = target.getAbsoluteAdapterPosition();
-                Collections.swap(channels, from, to);
-                rv.getAdapter().notifyItemMoved(from, to);
-                findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
-                return true;
-            }
+@Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder target) {
+    int from = vh.getAbsoluteAdapterPosition();
+    int to = target.getAbsoluteAdapterPosition();
+
+    // ПРАВИЛЬНАЯ ЛОГИКА СДВИГА:
+    if (from < to) {
+        for (int i = from; i < to; i++) {
+            Collections.swap(channels, i, i + 1);
+        }
+    } else {
+        for (int i = from; i > to; i--) {
+            Collections.swap(channels, i, i - 1);
+        }
+    }
+    
+    rv.getAdapter().notifyItemMoved(from, to);
+    findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+    return true;
+}
             @Override public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {
                 // Здесь пусто, свайпы отключены
             }
@@ -99,10 +110,25 @@ private void openSortMode() {
         th.attachToRecyclerView(recyclerView);
     }
 
-    private void closeSortMode() {
-        sortingLayout.setVisibility(View.GONE);
-        updateListView();
+private void closeSortMode() {
+    sortingLayout.setVisibility(View.GONE);
+    
+    // Пересчитываем индекс текущего канала, чтобы не было скачков
+    String currentUrl = (channels.size() > currentIdx) ? channels.get(currentIdx)[1] : "";
+    
+    updateListView(); // Обновляем шторку
+
+    // Ищем, где теперь наш канал в новом списке
+    if (!currentUrl.isEmpty()) {
+        for (int i = 0; i < channels.size(); i++) {
+            if (channels.get(i)[1].equals(currentUrl)) {
+                currentIdx = i;
+                prefs.edit().putInt("last_idx", currentIdx).apply();
+                break;
+            }
+        }
     }
+}
 
     private void savePlaylistToFile(Uri uri) {
         try (OutputStream os = getContentResolver().openOutputStream(uri);
