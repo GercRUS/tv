@@ -34,8 +34,6 @@ public class MainActivity extends AppCompatActivity {
     private int currentIdx = 0;
     private SharedPreferences prefs;
     private final Handler hideHandler = new Handler(Looper.getMainLooper());
-    
-    // Единый User-Agent для плеера и загрузчика
     private final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
     private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
@@ -69,7 +67,11 @@ public class MainActivity extends AppCompatActivity {
         statusText = findViewById(R.id.status_text);
         progressBar = findViewById(R.id.progress_bar);
 
-        // Настройка ExoPlayer с подменой User-Agent
+        // ФИКС ФОКУСА: заставляем плеер ловить кнопки сразу
+        playerView.setFocusable(true);
+        playerView.setFocusableInTouchMode(true);
+        playerView.requestFocus();
+
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setUserAgent(UA)
                 .setAllowCrossProtocolRedirects(true);
@@ -279,6 +281,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            // ФИКС КНОПОК: проверяем, что плейлист загружен
+            if (channels.isEmpty()) return super.dispatchKeyEvent(e);
+
             int c = e.getKeyCode();
             if (c == KeyEvent.KEYCODE_DPAD_UP || c == KeyEvent.KEYCODE_DPAD_RIGHT || c == KeyEvent.KEYCODE_CHANNEL_UP || c == KeyEvent.KEYCODE_MEDIA_NEXT || c == KeyEvent.KEYCODE_PAGE_UP) { playChannel(currentIdx + 1); return true; }
             if (c == KeyEvent.KEYCODE_DPAD_DOWN || c == KeyEvent.KEYCODE_DPAD_LEFT || c == KeyEvent.KEYCODE_CHANNEL_DOWN || c == KeyEvent.KEYCODE_MEDIA_PREVIOUS || c == KeyEvent.KEYCODE_PAGE_DOWN) { playChannel(currentIdx - 1); return true; }
@@ -289,6 +294,8 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onResume() { 
         super.onResume(); 
         hideSystemUI(); 
+        // Принудительный фокус на плеер при возврате
+        playerView.requestFocus();
         if (channels != null && !channels.isEmpty()) playChannel(currentIdx);
     }
     @Override protected void onStop() { super.onStop(); if (player != null) player.pause(); }
