@@ -2,7 +2,7 @@
 Минималистичный простой iptv плеер для Android-планшетов для старых устройств и процессоров.
 Максимально простой интерфейс и возможности, превращает ваш планшет в телевизор.
 При открытии приложения запускается последний просмотренный канал из m3u плейлиста.
-Изображение заполняется на весь экран, никаких черныхполос снизу и сверху, оптимизирован под экраны 16:10
+Изображение заполняет весь экран, никаких черных полос снизу и сверху, оптимизирован под экраны 16:10.
 Плейлист можно загрузить 3 способами (нажмите иконку гаечный ключ для всплывающего меню):
 - Ссылкой на m3u из интернета
 - Из буфера обмена
@@ -19,6 +19,7 @@
   # Tiny IPTV
 A minimalist, simple IPTV player for Android tablets, compatible with older devices and processors.
 An extremely simple interface and features transform your tablet into a TV.
+The image fills the entire screen, no black bars at the top or bottom, optimized for 16:10 screens.
 When you open the app, the last viewed channel from the m3u playlist is launched.
 The playlist can be loaded in three ways (click the wrench icon to open the pop-up menu):
 - Link to an m3u file from the internet
