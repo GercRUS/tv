@@ -73,17 +73,17 @@ public class MainActivity extends AppCompatActivity {
         else drawer.openDrawer(GravityCompat.START);
     }
 
-    private void openSortMode() {
+private void openSortMode() {
         drawer.closeDrawers();
         sortingLayout.setVisibility(View.VISIBLE);
         
         recyclerView.setLayoutManager(new GridLayoutManager(this, 4));
-        ChannelAdapter adapter = new ChannelAdapter();
-        recyclerView.setAdapter(adapter);
+        recyclerView.setAdapter(new ChannelAdapter());
 
+        // Оставляем только перетаскивание (Drag), убираем свайпы (0)
         ItemTouchHelper th = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(
-                ItemTouchHelper.UP|ItemTouchHelper.DOWN|ItemTouchHelper.LEFT|ItemTouchHelper.RIGHT,
-                ItemTouchHelper.LEFT|ItemTouchHelper.RIGHT) {
+                ItemTouchHelper.UP | ItemTouchHelper.DOWN | ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT, 0) {
+            
             @Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder target) {
                 int from = vh.getAbsoluteAdapterPosition();
                 int to = target.getAbsoluteAdapterPosition();
@@ -93,9 +93,7 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
             @Override public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {
-                channels.remove(vh.getAbsoluteAdapterPosition());
-                recyclerView.getAdapter().notifyItemRemoved(vh.getAbsoluteAdapterPosition());
-                findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                // Здесь пусто, свайпы отключены
             }
         });
         th.attachToRecyclerView(recyclerView);
@@ -160,16 +158,61 @@ public class MainActivity extends AppCompatActivity {
         lv.setOnItemClickListener((p, v, pos, id) -> { playChannel(pos); drawer.closeDrawers(); });
     }
 
-    private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
-        class VH extends RecyclerView.ViewHolder { TextView txt; VH(View v) { super(v); txt = (TextView) v; } }
-        @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
-            TextView tv = new TextView(p.getContext());
-            tv.setLayoutParams(new ViewGroup.LayoutParams(-1, -2));
-            tv.setPadding(10, 20, 10, 20); tv.setTextColor(-1); tv.setTextSize(14); tv.setGravity(Gravity.CENTER);
-            tv.setBackgroundResource(android.R.drawable.btn_default);
-            return new VH(tv);
+private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
+        class VH extends RecyclerView.ViewHolder { 
+            TextView txt; 
+            View deleteBtn; 
+            VH(View v) { 
+                super(v); 
+                txt = v.findViewById(android.R.id.text1);
+                deleteBtn = v.findViewById(android.R.id.closeButton);
+            } 
         }
-        @Override public void onBindViewHolder(@NonNull VH h, int p) { h.txt.setText(channels.get(p)[0]); }
+
+        @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
+            // Создаем контейнер для плитки программно, чтобы не плодить XML файлы
+            FrameLayout container = new FrameLayout(p.getContext());
+            container.setLayoutParams(new ViewGroup.LayoutParams(-1, 150)); // Высота плитки 150px
+            container.setPadding(5, 5, 5, 5);
+
+            // Сама плитка (фон)
+            TextView tv = new TextView(p.getContext());
+            tv.setId(android.R.id.text1);
+            tv.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+            tv.setGravity(Gravity.CENTER);
+            tv.setTextColor(-1);
+            tv.setTextSize(14);
+            tv.setBackgroundResource(android.R.drawable.btn_default);
+            container.addView(tv);
+
+            // Кнопка удаления (крестик в углу)
+            TextView del = new TextView(p.getContext());
+            del.setId(android.R.id.closeButton);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(60, 60);
+            lp.gravity = Gravity.TOP | Gravity.END;
+            del.setLayoutParams(lp);
+            del.setText("X");
+            del.setGravity(Gravity.CENTER);
+            del.setTextColor(android.graphics.Color.RED);
+            del.setTextSize(16);
+            del.setTypeface(null, android.graphics.Typeface.BOLD);
+            del.setBackgroundColor(0x44000000); // Полупрозрачный фон под крестиком
+            container.addView(del);
+
+            return new VH(container);
+        }
+
+        @Override public void onBindViewHolder(@NonNull VH h, int p) {
+            h.txt.setText(channels.get(p)[0]);
+            
+            // Кнопка удаления
+            h.deleteBtn.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                channels.remove(pos);
+                notifyItemRemoved(pos);
+                findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+            });
+        }
         @Override public int getItemCount() { return channels.size(); }
     }
 
