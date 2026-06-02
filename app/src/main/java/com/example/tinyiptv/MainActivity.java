@@ -266,7 +266,19 @@ public class MainActivity extends AppCompatActivity {
         return super.dispatchKeyEvent(e);
     }
 
-    @Override protected void onResume() { super.onResume(); hideSystemUI(); if (player != null) player.play(); }
+    @Override 
+    protected void onResume() { 
+        super.onResume(); 
+        hideSystemUI(); 
+        
+        if (player != null) {
+            player.play(); 
+            player.seekToDefaultPosition();
+            player.prepare();
+        } 
+        
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
     @Override protected void onStop() { super.onStop(); if (player != null) player.pause(); }
     @Override protected void onDestroy() { super.onDestroy(); if (player != null) player.release(); }
 }
