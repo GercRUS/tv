@@ -30,21 +30,17 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
     private final Handler hideHandler = new Handler(Looper.getMainLooper());
 
-    // Лаунчер для выбора файла (импорт)
-    private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(
-            new ActivityResultContracts.OpenDocument(), uri -> {
-                if (uri != null) {
-                    try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
-                    resetCache();
-                    loadPlaylist(uri);
-                }
-            });
+    private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+        if (uri != null) {
+            try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+            resetCache();
+            loadPlaylist(uri);
+        }
+    });
 
-    // Лаунчер для сохранения файла (экспорт)
-    private final ActivityResultLauncher<String> fileSaver = registerForActivityResult(
-            new ActivityResultContracts.CreateDocument("audio/x-mpegurl"), uri -> {
-                if (uri != null) savePlaylistToUri(uri);
-            });
+    private final ActivityResultLauncher<String> fileSaver = registerForActivityResult(new ActivityResultContracts.CreateDocument("audio/x-mpegurl"), uri -> {
+        if (uri != null) savePlaylistToUri(uri);
+    });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,7 +48,6 @@ public class MainActivity extends AppCompatActivity {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.activity_main);
         
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUI();
 
         prefs = getPreferences(MODE_PRIVATE);
@@ -65,17 +60,13 @@ public class MainActivity extends AppCompatActivity {
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
 
-        // Кнопки в шторке
         findViewById(R.id.btn_settings).setOnClickListener(v -> showSettingsDialog());
         findViewById(R.id.btn_sort).setOnClickListener(v -> openSortMode());
-        findViewById(R.id.btn_save).setOnClickListener(v -> fileSaver.launch("my_sorted_list.m3u"));
-        
-        // Кнопка выхода из сортировки
         findViewById(R.id.btn_done_sort).setOnClickListener(v -> closeSortMode());
+        findViewById(R.id.btn_save).setOnClickListener(v -> fileSaver.launch("my_sorted_list.m3u"));
 
         initGestures(findViewById(R.id.gesture_layer));
 
-        // Пытаемся загрузить кэш или последний плейлист
         File cacheFile = new File(getFilesDir(), "cache.m3u");
         if (prefs.getBoolean("use_cache", false) && cacheFile.exists()) {
             loadPlaylist(Uri.fromFile(cacheFile));
@@ -142,9 +133,9 @@ public class MainActivity extends AppCompatActivity {
              BufferedWriter w = new BufferedWriter(new OutputStreamWriter(os))) {
             w.write("#EXTM3U\n");
             for (String[] ch : channels) w.write("#EXTINF:-1," + ch[0] + "\n" + ch[1] + "\n");
-            Toast.makeText(this, "Плейлист экспортирован!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Экспорт завершен!", Toast.LENGTH_SHORT).show();
             findViewById(R.id.btn_save).setVisibility(View.GONE);
-        } catch (Exception e) { Toast.makeText(this, "Ошибка экспорта", Toast.LENGTH_SHORT).show(); }
+        } catch (Exception e) { Toast.makeText(this, "Ошибка записи", Toast.LENGTH_SHORT).show(); }
     }
 
     private void playChannel(int idx) {
@@ -202,17 +193,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
-        class VH extends RecyclerView.ViewHolder { TextView txt; View del; VH(View v) { super(v); txt = v.findViewById(android.R.id.text1); del = v.findViewById(android.R.id.closeButton); } }
+        class VH extends RecyclerView.ViewHolder { TextView txt; View del; View upBtn; VH(View v) { 
+            super(v); 
+            txt = v.findViewById(android.R.id.text1); 
+            del = v.findViewById(android.R.id.closeButton);
+            upBtn = v.findViewById(android.R.id.copy);
+        } }
+
         @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
             FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 150)); l.setPadding(5,5,5,5);
             TextView tv = new TextView(p.getContext()); tv.setId(android.R.id.text1); tv.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
             tv.setGravity(Gravity.CENTER); tv.setTextColor(-1); tv.setTextSize(12); tv.setBackgroundResource(android.R.drawable.btn_default);
             l.addView(tv);
-            TextView d = new TextView(p.getContext()); d.setId(android.R.id.closeButton); FrameLayout.LayoutParams dp = new FrameLayout.LayoutParams(60,60);
+            
+            TextView d = new TextView(p.getContext()); d.setId(android.R.id.closeButton); FrameLayout.LayoutParams dp = new FrameLayout.LayoutParams(70,70);
             dp.gravity = Gravity.TOP|Gravity.END; d.setLayoutParams(dp); d.setText("X"); d.setGravity(Gravity.CENTER); d.setTextColor(android.graphics.Color.RED);
             d.setTextSize(16); d.setTypeface(null, android.graphics.Typeface.BOLD); d.setBackgroundColor(0x44000000);
-            l.addView(d); return new VH(l);
+            l.addView(d);
+
+            TextView u = new TextView(p.getContext()); u.setId(android.R.id.copy); FrameLayout.LayoutParams up = new FrameLayout.LayoutParams(70,70);
+            up.gravity = Gravity.TOP|Gravity.START; u.setLayoutParams(up); u.setText("↑"); u.setGravity(Gravity.CENTER); u.setTextColor(android.graphics.Color.GREEN);
+            u.setTextSize(22); u.setTypeface(null, android.graphics.Typeface.BOLD); u.setBackgroundColor(0x44000000);
+            l.addView(u);
+
+            return new VH(l);
         }
+
         @Override public void onBindViewHolder(@NonNull VH h, int p) {
             h.txt.setText(channels.get(p)[0]);
             h.del.setOnClickListener(v -> {
@@ -220,6 +226,17 @@ public class MainActivity extends AppCompatActivity {
                 channels.remove(pos); notifyItemRemoved(pos);
                 findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
                 autoSaveCache();
+            });
+            h.upBtn.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                if (pos > 0) {
+                    String[] channel = channels.remove(pos);
+                    channels.add(0, channel);
+                    notifyItemMoved(pos, 0);
+                    notifyItemRangeChanged(0, pos + 1);
+                    findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                    autoSaveCache();
+                }
             });
         }
         @Override public int getItemCount() { return channels.size(); }
@@ -266,7 +283,7 @@ public class MainActivity extends AppCompatActivity {
         return super.dispatchKeyEvent(e);
     }
 
-    @Override 
+@Override 
     protected void onResume() { 
         super.onResume(); 
         hideSystemUI(); 
