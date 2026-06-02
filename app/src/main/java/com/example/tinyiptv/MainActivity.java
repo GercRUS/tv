@@ -30,17 +30,21 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
     private final Handler hideHandler = new Handler(Looper.getMainLooper());
 
-    private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
-        if (uri != null) {
-            try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
-            resetCache();
-            loadPlaylist(uri);
-        }
-    });
+    // Лаунчер для выбора файла (импорт)
+    private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(
+            new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri != null) {
+                    try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+                    resetCache();
+                    loadPlaylist(uri);
+                }
+            });
 
-    private final ActivityResultLauncher<String> fileSaver = registerForActivityResult(new ActivityResultContracts.CreateDocument("audio/x-mpegurl"), uri -> {
-        if (uri != null) savePlaylistToUri(uri);
-    });
+    // Лаунчер для сохранения файла (экспорт)
+    private final ActivityResultLauncher<String> fileSaver = registerForActivityResult(
+            new ActivityResultContracts.CreateDocument("audio/x-mpegurl"), uri -> {
+                if (uri != null) savePlaylistToUri(uri);
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,10 +65,13 @@ public class MainActivity extends AppCompatActivity {
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
 
+        // Кнопки в шторке
         findViewById(R.id.btn_settings).setOnClickListener(v -> showSettingsDialog());
         findViewById(R.id.btn_sort).setOnClickListener(v -> openSortMode());
+        findViewById(R.id.btn_save).setOnClickListener(v -> fileSaver.launch("my_sorted_list.m3u"));
+        
+        // Кнопка выхода из сортировки
         findViewById(R.id.btn_done_sort).setOnClickListener(v -> closeSortMode());
-        findViewById(R.id.btn_save).setOnClickListener(v -> fileSaver.launch("my_playlist.m3u"));
 
         initGestures(findViewById(R.id.gesture_layer));
 
@@ -135,9 +142,9 @@ public class MainActivity extends AppCompatActivity {
              BufferedWriter w = new BufferedWriter(new OutputStreamWriter(os))) {
             w.write("#EXTM3U\n");
             for (String[] ch : channels) w.write("#EXTINF:-1," + ch[0] + "\n" + ch[1] + "\n");
-            Toast.makeText(this, "Сохранено!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Плейлист экспортирован!", Toast.LENGTH_SHORT).show();
             findViewById(R.id.btn_save).setVisibility(View.GONE);
-        } catch (Exception e) { Toast.makeText(this, "Ошибка записи", Toast.LENGTH_SHORT).show(); }
+        } catch (Exception e) { Toast.makeText(this, "Ошибка экспорта", Toast.LENGTH_SHORT).show(); }
     }
 
     private void playChannel(int idx) {
@@ -155,8 +162,8 @@ public class MainActivity extends AppCompatActivity {
     private void loadPlaylist(Uri uri) {
         new Thread(() -> {
             List<String[]> tmp = new ArrayList<>();
+            InputStream is = null;
             try {
-                InputStream is;
                 if (uri.toString().startsWith("http")) {
                     java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(uri.toString()).openConnection();
                     c.setConnectTimeout(5000); is = c.getInputStream();
@@ -181,7 +188,8 @@ public class MainActivity extends AppCompatActivity {
                     if (!uri.toString().contains("cache.m3u")) prefs.edit().putString("last_playlist", uri.toString()).apply();
                     if (!channels.isEmpty()) playChannel(prefs.getInt("last_idx", 0));
                 });
-            } catch (Exception e) { runOnUiThread(() -> Toast.makeText(this, "Ошибка загрузки", Toast.LENGTH_SHORT).show()); }
+            } catch (Exception e) { runOnUiThread(() -> Toast.makeText(this, "Ошибка", Toast.LENGTH_SHORT).show()); }
+            finally { try { if (is != null) is.close(); } catch (Exception ignored) {} }
         }).start();
     }
 
@@ -221,7 +229,10 @@ public class MainActivity extends AppCompatActivity {
         GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
                 if (channels.isEmpty()) return false;
-                if (Math.abs(vY) > Math.abs(vX)) { playChannel(vY > 0 ? currentIdx - 1 : currentIdx + 1); return true; }
+                if (Math.abs(vY) > Math.abs(vX)) {
+                    if (vY > 0) playChannel(currentIdx - 1); else playChannel(currentIdx + 1);
+                    return true;
+                }
                 return false;
             }
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
@@ -233,12 +244,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showSettingsDialog() {
-        String[] opt = {"Из буфера", "Выбрать файл"};
+        String[] opt = {"Из буфера", "Выбрать M3U файл"};
         new AlertDialog.Builder(this).setItems(opt, (d, w) -> {
-            resetCache();
             if (w == 0) {
                 ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                if (cb.hasPrimaryClip()) loadPlaylist(Uri.parse(cb.getPrimaryClip().getItemAt(0).getText().toString().trim()));
+                if (cb.hasPrimaryClip()) { resetCache(); loadPlaylist(Uri.parse(cb.getPrimaryClip().getItemAt(0).getText().toString().trim())); }
             } else filePicker.launch(new String[]{"*/*"});
         }).show();
     }
