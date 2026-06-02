@@ -33,12 +33,13 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
         if (uri != null) {
             try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+            resetCache();
             loadPlaylist(uri);
         }
     });
 
     private final ActivityResultLauncher<String> fileSaver = registerForActivityResult(new ActivityResultContracts.CreateDocument("audio/x-mpegurl"), uri -> {
-        if (uri != null) savePlaylistToFile(uri);
+        if (uri != null) savePlaylistToUri(uri);
     });
 
     @Override
@@ -60,7 +61,6 @@ public class MainActivity extends AppCompatActivity {
         player = new ExoPlayer.Builder(this).build();
         playerView.setPlayer(player);
 
-        // Кнопки
         findViewById(R.id.btn_settings).setOnClickListener(v -> showSettingsDialog());
         findViewById(R.id.btn_sort).setOnClickListener(v -> openSortMode());
         findViewById(R.id.btn_done_sort).setOnClickListener(v -> closeSortMode());
@@ -68,73 +68,73 @@ public class MainActivity extends AppCompatActivity {
 
         initGestures(findViewById(R.id.gesture_layer));
 
-        String lastUri = prefs.getString("last_playlist", "");
-        if (!lastUri.isEmpty()) loadPlaylist(Uri.parse(lastUri));
-        else drawer.openDrawer(GravityCompat.START);
+        // Пытаемся загрузить кэш или последний плейлист
+        File cacheFile = new File(getFilesDir(), "cache.m3u");
+        if (prefs.getBoolean("use_cache", false) && cacheFile.exists()) {
+            loadPlaylist(Uri.fromFile(cacheFile));
+        } else {
+            String lastUri = prefs.getString("last_playlist", "");
+            if (!lastUri.isEmpty()) loadPlaylist(Uri.parse(lastUri));
+            else drawer.openDrawer(GravityCompat.START);
+        }
     }
 
-private void openSortMode() {
+    private void openSortMode() {
         drawer.closeDrawers();
         sortingLayout.setVisibility(View.VISIBLE);
-        
         recyclerView.setLayoutManager(new GridLayoutManager(this, 4));
         recyclerView.setAdapter(new ChannelAdapter());
 
-        // Оставляем только перетаскивание (Drag), убираем свайпы (0)
         ItemTouchHelper th = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(
-                ItemTouchHelper.UP | ItemTouchHelper.DOWN | ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT, 0) {
-            
-@Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder target) {
-    int from = vh.getAbsoluteAdapterPosition();
-    int to = target.getAbsoluteAdapterPosition();
-
-    // ПРАВИЛЬНАЯ ЛОГИКА СДВИГА:
-    if (from < to) {
-        for (int i = from; i < to; i++) {
-            Collections.swap(channels, i, i + 1);
-        }
-    } else {
-        for (int i = from; i > to; i--) {
-            Collections.swap(channels, i, i - 1);
-        }
-    }
-    
-    rv.getAdapter().notifyItemMoved(from, to);
-    findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
-    return true;
-}
-            @Override public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {
-                // Здесь пусто, свайпы отключены
+                ItemTouchHelper.UP|ItemTouchHelper.DOWN|ItemTouchHelper.LEFT|ItemTouchHelper.RIGHT, 0) {
+            @Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder target) {
+                int from = vh.getAbsoluteAdapterPosition();
+                int to = target.getAbsoluteAdapterPosition();
+                if (from < to) {
+                    for (int i = from; i < to; i++) Collections.swap(channels, i, i + 1);
+                } else {
+                    for (int i = from; i > to; i--) Collections.swap(channels, i, i - 1);
+                }
+                rv.getAdapter().notifyItemMoved(from, to);
+                findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                autoSaveCache();
+                return true;
             }
+            @Override public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {}
         });
         th.attachToRecyclerView(recyclerView);
     }
 
-private void closeSortMode() {
-    sortingLayout.setVisibility(View.GONE);
-    
-    // Пересчитываем индекс текущего канала, чтобы не было скачков
-    String currentUrl = (channels.size() > currentIdx) ? channels.get(currentIdx)[1] : "";
-    
-    updateListView(); // Обновляем шторку
-
-    // Ищем, где теперь наш канал в новом списке
-    if (!currentUrl.isEmpty()) {
-        for (int i = 0; i < channels.size(); i++) {
-            if (channels.get(i)[1].equals(currentUrl)) {
-                currentIdx = i;
-                prefs.edit().putInt("last_idx", currentIdx).apply();
-                break;
+    private void closeSortMode() {
+        sortingLayout.setVisibility(View.GONE);
+        String currentUrl = (channels.size() > currentIdx) ? channels.get(currentIdx)[1] : "";
+        updateListView();
+        if (!currentUrl.isEmpty()) {
+            for (int i = 0; i < channels.size(); i++) {
+                if (channels.get(i)[1].equals(currentUrl)) { currentIdx = i; break; }
             }
         }
     }
-}
 
-    private void savePlaylistToFile(Uri uri) {
+    private void autoSaveCache() {
+        try (FileOutputStream fos = openFileOutput("cache.m3u", Context.MODE_PRIVATE);
+             BufferedWriter w = new BufferedWriter(new OutputStreamWriter(fos))) {
+            w.write("#EXTM3U\n");
+            for (String[] ch : channels) w.write("#EXTINF:-1," + ch[0] + "\n" + ch[1] + "\n");
+            prefs.edit().putBoolean("use_cache", true).apply();
+        } catch (Exception e) { e.printStackTrace(); }
+    }
+
+    private void resetCache() {
+        prefs.edit().putBoolean("use_cache", false).apply();
+        new File(getFilesDir(), "cache.m3u").delete();
+    }
+
+    private void savePlaylistToUri(Uri uri) {
         try (OutputStream os = getContentResolver().openOutputStream(uri);
              BufferedWriter w = new BufferedWriter(new OutputStreamWriter(os))) {
             w.write("#EXTM3U\n");
-            for (String[] ch : channels) { w.write("#EXTINF:-1," + ch[0] + "\n" + ch[1] + "\n"); }
+            for (String[] ch : channels) w.write("#EXTINF:-1," + ch[0] + "\n" + ch[1] + "\n");
             Toast.makeText(this, "Сохранено!", Toast.LENGTH_SHORT).show();
             findViewById(R.id.btn_save).setVisibility(View.GONE);
         } catch (Exception e) { Toast.makeText(this, "Ошибка записи", Toast.LENGTH_SHORT).show(); }
@@ -155,24 +155,33 @@ private void closeSortMode() {
     private void loadPlaylist(Uri uri) {
         new Thread(() -> {
             List<String[]> tmp = new ArrayList<>();
-            try (InputStream is = (uri.toString().startsWith("http")) ? new java.net.URL(uri.toString()).openStream() : getContentResolver().openInputStream(uri);
-                 BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
-                String line, name = "Канал";
-                while ((line = br.readLine()) != null) {
-                    line = line.trim();
-                    if (line.startsWith("#EXTINF")) {
-                        int c = line.lastIndexOf(",");
-                        if (c != -1) name = line.substring(c + 1);
-                    } else if (line.startsWith("http") || line.startsWith("rtsp") || line.startsWith("rtmp")) {
-                        tmp.add(new String[]{name, line});
+            try {
+                InputStream is;
+                if (uri.toString().startsWith("http")) {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(uri.toString()).openConnection();
+                    c.setConnectTimeout(5000); is = c.getInputStream();
+                } else is = getContentResolver().openInputStream(uri);
+
+                if (is != null) {
+                    BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                    String line, name = "Канал";
+                    while ((line = br.readLine()) != null) {
+                        line = line.trim();
+                        if (line.startsWith("#EXTINF")) {
+                            int c = line.lastIndexOf(",");
+                            if (c != -1) name = line.substring(c + 1);
+                        } else if (line.startsWith("http") || line.startsWith("rtsp") || line.startsWith("rtmp")) {
+                            tmp.add(new String[]{name, line});
+                        }
                     }
+                    br.close();
                 }
                 runOnUiThread(() -> {
                     channels = tmp; updateListView();
-                    prefs.edit().putString("last_playlist", uri.toString()).apply();
+                    if (!uri.toString().contains("cache.m3u")) prefs.edit().putString("last_playlist", uri.toString()).apply();
                     if (!channels.isEmpty()) playChannel(prefs.getInt("last_idx", 0));
                 });
-            } catch (Exception e) { runOnUiThread(() -> Toast.makeText(this, "Ошибка M3U", Toast.LENGTH_SHORT).show()); }
+            } catch (Exception e) { runOnUiThread(() -> Toast.makeText(this, "Ошибка загрузки", Toast.LENGTH_SHORT).show()); }
         }).start();
     }
 
@@ -184,59 +193,25 @@ private void closeSortMode() {
         lv.setOnItemClickListener((p, v, pos, id) -> { playChannel(pos); drawer.closeDrawers(); });
     }
 
-private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
-        class VH extends RecyclerView.ViewHolder { 
-            TextView txt; 
-            View deleteBtn; 
-            VH(View v) { 
-                super(v); 
-                txt = v.findViewById(android.R.id.text1);
-                deleteBtn = v.findViewById(android.R.id.closeButton);
-            } 
-        }
-
+    private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
+        class VH extends RecyclerView.ViewHolder { TextView txt; View del; VH(View v) { super(v); txt = v.findViewById(android.R.id.text1); del = v.findViewById(android.R.id.closeButton); } }
         @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
-            // Создаем контейнер для плитки программно, чтобы не плодить XML файлы
-            FrameLayout container = new FrameLayout(p.getContext());
-            container.setLayoutParams(new ViewGroup.LayoutParams(-1, 150)); // Высота плитки 150px
-            container.setPadding(5, 5, 5, 5);
-
-            // Сама плитка (фон)
-            TextView tv = new TextView(p.getContext());
-            tv.setId(android.R.id.text1);
-            tv.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
-            tv.setGravity(Gravity.CENTER);
-            tv.setTextColor(-1);
-            tv.setTextSize(14);
-            tv.setBackgroundResource(android.R.drawable.btn_default);
-            container.addView(tv);
-
-            // Кнопка удаления (крестик в углу)
-            TextView del = new TextView(p.getContext());
-            del.setId(android.R.id.closeButton);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(60, 60);
-            lp.gravity = Gravity.TOP | Gravity.END;
-            del.setLayoutParams(lp);
-            del.setText("X");
-            del.setGravity(Gravity.CENTER);
-            del.setTextColor(android.graphics.Color.RED);
-            del.setTextSize(16);
-            del.setTypeface(null, android.graphics.Typeface.BOLD);
-            del.setBackgroundColor(0x44000000); // Полупрозрачный фон под крестиком
-            container.addView(del);
-
-            return new VH(container);
+            FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 150)); l.setPadding(5,5,5,5);
+            TextView tv = new TextView(p.getContext()); tv.setId(android.R.id.text1); tv.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
+            tv.setGravity(Gravity.CENTER); tv.setTextColor(-1); tv.setTextSize(12); tv.setBackgroundResource(android.R.drawable.btn_default);
+            l.addView(tv);
+            TextView d = new TextView(p.getContext()); d.setId(android.R.id.closeButton); FrameLayout.LayoutParams dp = new FrameLayout.LayoutParams(60,60);
+            dp.gravity = Gravity.TOP|Gravity.END; d.setLayoutParams(dp); d.setText("X"); d.setGravity(Gravity.CENTER); d.setTextColor(android.graphics.Color.RED);
+            d.setTextSize(16); d.setTypeface(null, android.graphics.Typeface.BOLD); d.setBackgroundColor(0x44000000);
+            l.addView(d); return new VH(l);
         }
-
         @Override public void onBindViewHolder(@NonNull VH h, int p) {
             h.txt.setText(channels.get(p)[0]);
-            
-            // Кнопка удаления
-            h.deleteBtn.setOnClickListener(v -> {
+            h.del.setOnClickListener(v -> {
                 int pos = h.getAbsoluteAdapterPosition();
-                channels.remove(pos);
-                notifyItemRemoved(pos);
+                channels.remove(pos); notifyItemRemoved(pos);
                 findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                autoSaveCache();
             });
         }
         @Override public int getItemCount() { return channels.size(); }
@@ -260,6 +235,7 @@ private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
     private void showSettingsDialog() {
         String[] opt = {"Из буфера", "Выбрать файл"};
         new AlertDialog.Builder(this).setItems(opt, (d, w) -> {
+            resetCache();
             if (w == 0) {
                 ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                 if (cb.hasPrimaryClip()) loadPlaylist(Uri.parse(cb.getPrimaryClip().getItemAt(0).getText().toString().trim()));
@@ -274,8 +250,8 @@ private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
             int c = e.getKeyCode();
-            if (c == KeyEvent.KEYCODE_DPAD_UP || c == KeyEvent.KEYCODE_CHANNEL_UP || c == KeyEvent.KEYCODE_PAGE_UP) { playChannel(currentIdx - 1); return true; }
-            if (c == KeyEvent.KEYCODE_DPAD_DOWN || c == KeyEvent.KEYCODE_CHANNEL_DOWN || c == KeyEvent.KEYCODE_PAGE_DOWN) { playChannel(currentIdx + 1); return true; }
+            if (c == KeyEvent.KEYCODE_DPAD_UP || c == KeyEvent.KEYCODE_DPAD_RIGHT || c == KeyEvent.KEYCODE_CHANNEL_UP || c == KeyEvent.KEYCODE_MEDIA_NEXT || c == KeyEvent.KEYCODE_PAGE_UP) { playChannel(currentIdx + 1); return true; }
+            if (c == KeyEvent.KEYCODE_DPAD_DOWN || c == KeyEvent.KEYCODE_DPAD_LEFT || c == KeyEvent.KEYCODE_CHANNEL_DOWN || c == KeyEvent.KEYCODE_MEDIA_PREVIOUS || c == KeyEvent.KEYCODE_PAGE_DOWN) { playChannel(currentIdx - 1); return true; }
         }
         return super.dispatchKeyEvent(e);
     }
