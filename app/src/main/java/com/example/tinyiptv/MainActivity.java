@@ -229,11 +229,29 @@ private void loadPlaylist(Uri uri) {
                 return true;
             }
         }
-        // Если это кнопка громкости или любая другая — отдаем её системе (стандартное поведение)
         return super.dispatchKeyEvent(event);
     }
 
-    @Override protected void onResume() { super.onResume(); hideSystemUI(); player.play(); }
-    @Override protected void onStop() { super.onStop(); player.pause(); }
-    @Override protected void onDestroy() { super.onDestroy(); player.release(); }
+    @Override 
+    protected void onResume() { 
+        super.onResume(); 
+        hideSystemUI(); 
+        
+        // ВОТ ЭТА СТРОКА ВКЛЮЧАЕТ ПОДДЕРЖКУ ЭКРАНА:
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        
+        if (player != null) player.play(); 
+    }
+
+    @Override 
+    protected void onStop() { 
+        super.onStop(); 
+        if (player != null) player.pause(); 
+    }
+
+    @Override 
+    protected void onDestroy() { 
+        super.onDestroy(); 
+        if (player != null) player.release(); 
+    }
 }
