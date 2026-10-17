@@ -3,6 +3,7 @@ package com.example.tinyiptv;
 import android.content.*;
 import android.net.Uri;
 import android.os.*;
+import android.text.InputType;
 import android.view.*;
 import android.widget.*;
 import androidx.activity.result.ActivityResultLauncher;
@@ -98,6 +99,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn_sort).setOnClickListener(v -> openSortMode());
         findViewById(R.id.btn_done_sort).setOnClickListener(v -> closeSortMode());
         findViewById(R.id.btn_save).setOnClickListener(v -> fileSaver.launch("my_sorted_list.m3u"));
+        findViewById(R.id.btn_add).setOnClickListener(v -> showAddChannelDialog());
 
         initGestures(findViewById(R.id.gesture_layer));
 
@@ -118,6 +120,59 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void hideStatus() { statusLayout.setVisibility(View.GONE); }
+
+    private void showAddChannelDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        layout.setPadding(pad, pad / 2, pad, 0);
+
+        final EditText etName = new EditText(this);
+        etName.setHint("Название канала");
+        etName.setSingleLine(true);
+        layout.addView(etName);
+
+        final EditText etUrl = new EditText(this);
+        etUrl.setHint("Ссылка m3u8");
+        etUrl.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        etUrl.setSingleLine(true);
+        layout.addView(etUrl);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Добавить канал")
+                .setView(layout)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Добавить", null)
+                .create();
+
+        dialog.setOnShowListener(di -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String name = etName.getText().toString().trim();
+            String url = etUrl.getText().toString().trim();
+            if (name.isEmpty() || url.isEmpty()) {
+                Toast.makeText(this, "Заполни название и ссылку", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (!url.startsWith("http://") && !url.startsWith("https://")
+                    && !url.startsWith("rtsp://") && !url.startsWith("rtmp://")) {
+                Toast.makeText(this, "Ссылка должна начинаться с http(s)://", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            boolean wasEmpty = channels.isEmpty();
+            channels.add(new String[]{name, url});
+            updateListView();
+            // если открыт полноэкранный список — сразу показываем новый канал в сетке
+            if (sortingLayout.getVisibility() == View.VISIBLE && recyclerView.getAdapter() != null) {
+                recyclerView.getAdapter().notifyItemInserted(channels.size() - 1);
+                recyclerView.scrollToPosition(channels.size() - 1);
+            }
+            autoSaveCache();
+            findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+            Toast.makeText(this, "Канал добавлен", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+            if (wasEmpty) playChannel(0);
+        }));
+        dialog.show();
+    }
 
     private void openSortMode() {
         drawer.closeDrawers();
