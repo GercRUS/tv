@@ -39,9 +39,15 @@ public class MainActivity extends AppCompatActivity {
     private int currentIdx = 0;
     // Тема меню сортировки: 0 = как в системе, 1 = всегда тёмная, 2 = всегда светлая
     private static final int THEME_MODE = 0;
-    private int colText, colBorder, colBg, colUp, colRed, colEdit;
+    private int colText, colBorder, colBg, colUp, colRed, colEdit, colShadow;
+    // Прозрачность фона меню сортировки: 0x00 = полностью прозрачный ... 0xFF = непрозрачный
+    private static final int SORT_BG_ALPHA = 0x99;
+    private String playingUrl = "";
+    private ItemTouchHelper touchHelper;
     private SharedPreferences prefs;
     private final Handler hideHandler = new Handler(Looper.getMainLooper());
+    private final Handler switchHandler = new Handler(Looper.getMainLooper());
+    private int errorCount = 0;
     private final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
     private final ActivityResultLauncher<String[]> filePicker = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
@@ -80,27 +86,7 @@ public class MainActivity extends AppCompatActivity {
         playerView.setFocusableInTouchMode(true);
         playerView.requestFocus();
 
-        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
-                .setUserAgent(UA)
-                .setAllowCrossProtocolRedirects(true);
-        DefaultMediaSourceFactory msFactory = new DefaultMediaSourceFactory(this)
-                .setDataSourceFactory(httpFactory);
-
-        player = new ExoPlayer.Builder(this).setMediaSourceFactory(msFactory).build();
-        playerView.setPlayer(player);
-
-        player.addListener(new Player.Listener() {
-            @Override
-            public void onPlaybackStateChanged(int state) {
-                if (state == Player.STATE_BUFFERING) showStatus("Буферизация...", true);
-                else if (state == Player.STATE_READY) hideStatus();
-                else if (state == Player.STATE_ENDED) showStatus("Поток завершен", false);
-            }
-            @Override
-            public void onPlayerError(PlaybackException e) {
-                showStatus("Источник недоступен (Error " + e.errorCode + ")", false);
-            }
-        });
+        createPlayer();
 
         findViewById(R.id.btn_settings).setOnClickListener(v -> showSettingsDialog());
         findViewById(R.id.btn_sort).setOnClickListener(v -> openSortMode());
@@ -137,17 +123,20 @@ public class MainActivity extends AppCompatActivity {
     private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
 
     /** Прозрачная плашка со скруглённой рамкой, без заливки */
-    private GradientDrawable outline(int color) {
+    private GradientDrawable outline(int color) { return outline(color, 2); }
+
+    private GradientDrawable outline(int color, int widthDp) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(Color.TRANSPARENT);
         g.setCornerRadius(dp(10));
-        g.setStroke(dp(2), color);
+        g.setStroke(dp(widthDp), color);
         return g;
     }
 
     private void styleButton(Button b) {
         b.setBackground(outline(colBorder));
         b.setTextColor(colText);
+        b.setShadowLayer(6, 0, 0, colShadow);
         b.setStateListAnimator(null);
         b.setPadding(dp(14), 0, dp(14), 0);
     }
@@ -156,13 +145,16 @@ public class MainActivity extends AppCompatActivity {
         boolean dark = isDarkTheme();
         colText = dark ? 0xFFFFFFFF : 0xFF000000;
         colBorder = dark ? 0x99FFFFFF : 0x99000000;
-        colBg = dark ? 0xF2000000 : 0xF2FFFFFF;
+        colBg = (SORT_BG_ALPHA << 24) | (dark ? 0x000000 : 0xFFFFFF);
+        colShadow = dark ? 0xFF000000 : 0xFFFFFFFF;
         colUp = dark ? 0xFF00FF00 : 0xFF2E7D32;
         colRed = dark ? 0xFFFF4444 : 0xFFC62828;
         colEdit = dark ? 0xFFFFC107 : 0xFFEF6C00;
 
         sortingLayout.setBackgroundColor(colBg);
-        ((TextView) findViewById(R.id.sort_title)).setTextColor(colText);
+        TextView title = findViewById(R.id.sort_title);
+        title.setTextColor(colText);
+        title.setShadowLayer(6, 0, 0, colShadow);
         styleButton((Button) findViewById(R.id.btn_add));
         styleButton((Button) findViewById(R.id.btn_done_sort));
     }
@@ -219,6 +211,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (editing) {
                 String oldUrl = channels.get(editPos)[1];
+                boolean wasPlaying = oldUrl.equals(playingUrl);
                 channels.set(editPos, new String[]{name, url});
                 updateListView();
                 if (sortingLayout.getVisibility() == View.VISIBLE && recyclerView.getAdapter() != null) {
@@ -229,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "Канал изменён", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
                 // если поменяли ссылку у играющего канала — перезапускаем его
-                if (editPos == currentIdx && !url.equals(oldUrl)) playChannel(currentIdx);
+                if (!url.equals(oldUrl) && (wasPlaying || sortingLayout.getVisibility() == View.VISIBLE)) playChannel(editPos);
             } else {
                 boolean wasEmpty = channels.isEmpty();
                 channels.add(new String[]{name, url});
@@ -244,6 +237,7 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "Канал добавлен", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
                 if (wasEmpty) playChannel(0);
+                else if (sortingLayout.getVisibility() == View.VISIBLE) playChannel(channels.size() - 1);
             }
         }));
         dialog.show();
@@ -271,7 +265,10 @@ public class MainActivity extends AppCompatActivity {
         sortingLayout.setVisibility(View.VISIBLE);
         recyclerView.setLayoutManager(new GridLayoutManager(this, 4));
         recyclerView.setAdapter(new ChannelAdapter());
-        ItemTouchHelper th = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP|ItemTouchHelper.DOWN|ItemTouchHelper.LEFT|ItemTouchHelper.RIGHT, 0) {
+        if (recyclerView.getItemAnimator() instanceof SimpleItemAnimator) {
+            ((SimpleItemAnimator) recyclerView.getItemAnimator()).setSupportsChangeAnimations(false);
+        }
+        if (touchHelper == null) { touchHelper = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP|ItemTouchHelper.DOWN|ItemTouchHelper.LEFT|ItemTouchHelper.RIGHT, 0) {
             @Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder target) {
                 int from = vh.getAbsoluteAdapterPosition(), to = target.getAbsoluteAdapterPosition();
                 if (from < to) { for (int i = from; i < to; i++) Collections.swap(channels, i, i + 1); } 
@@ -283,16 +280,19 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {}
         });
-        th.attachToRecyclerView(recyclerView);
+        touchHelper.attachToRecyclerView(recyclerView); }
     }
 
     private void closeSortMode() {
         sortingLayout.setVisibility(View.GONE);
-        String currentUrl = (channels.size() > currentIdx) ? channels.get(currentIdx)[1] : "";
         updateListView();
-        if (!currentUrl.isEmpty()) {
-            for (int i = 0; i < channels.size(); i++) { if (channels.get(i)[1].equals(currentUrl)) { currentIdx = i; break; } }
+        boolean found = false;
+        if (!playingUrl.isEmpty()) {
+            for (int i = 0; i < channels.size(); i++) {
+                if (channels.get(i)[1].equals(playingUrl)) { currentIdx = i; found = true; break; }
+            }
         }
+        if (!found && currentIdx >= channels.size()) currentIdx = Math.max(0, channels.size() - 1);
     }
 
     private void autoSaveCache() {
@@ -317,18 +317,72 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { Toast.makeText(this, "Ошибка записи", Toast.LENGTH_SHORT).show(); }
     }
 
+    private void createPlayer() {
+        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                .setUserAgent(UA)
+                .setAllowCrossProtocolRedirects(true);
+        DefaultMediaSourceFactory msFactory = new DefaultMediaSourceFactory(this)
+                .setDataSourceFactory(httpFactory);
+
+        player = new ExoPlayer.Builder(this).setMediaSourceFactory(msFactory).build();
+        playerView.setPlayer(player);
+
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_BUFFERING) showStatus("Буферизация...", true);
+                else if (state == Player.STATE_READY) { errorCount = 0; hideStatus(); }
+                else if (state == Player.STATE_ENDED) showStatus("Поток завершен", false);
+            }
+            @Override
+            public void onPlayerError(PlaybackException e) {
+                // HLS: отстали от live-окна — просто прыгаем к актуальному месту
+                if (e.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    player.seekToDefaultPosition();
+                    player.prepare();
+                    return;
+                }
+                showStatus("Источник недоступен (Error " + e.errorCode + ")", false);
+                // несколько ошибок подряд -> пересоздаём плеер, чтобы декодер не залипал
+                if (++errorCount >= 3) {
+                    errorCount = 0;
+                    switchHandler.post(() -> recreatePlayer());
+                }
+            }
+        });
+    }
+
+    private void recreatePlayer() {
+        if (player != null) {
+            playerView.setPlayer(null);
+            player.release();
+        }
+        createPlayer();
+    }
+
     private void playChannel(int idx) {
         if (channels.isEmpty()) return;
         hideStatus();
         currentIdx = (idx + channels.size()) % channels.size();
-        player.setMediaItem(MediaItem.fromUri(channels.get(currentIdx)[1]));
-        player.prepare(); 
-        player.play();
+        final String url = channels.get(currentIdx)[1];
+        playingUrl = url;
+        if (sortingLayout.getVisibility() == View.VISIBLE && recyclerView.getAdapter() != null) {
+            recyclerView.getAdapter().notifyItemRangeChanged(0, channels.size());
+        }
         prefs.edit().putInt("last_idx", currentIdx).apply();
         overlay.setText(channels.get(currentIdx)[0]);
         overlay.setVisibility(View.VISIBLE);
         hideHandler.removeCallbacksAndMessages(null);
         hideHandler.postDelayed(() -> overlay.setVisibility(View.GONE), 3000);
+
+        // Небольшая задержка: при быстром листании плеер запускается только на том канале,
+        // где остановились, а не на каждом промежуточном.
+        switchHandler.removeCallbacksAndMessages(null);
+        switchHandler.postDelayed(() -> {
+            player.setMediaItem(MediaItem.fromUri(url));
+            player.prepare();
+            player.play();
+        }, 300);
     }
 
     private void loadPlaylist(Uri uri) {
@@ -394,6 +448,7 @@ public class MainActivity extends AppCompatActivity {
             b.setGravity(Gravity.CENTER);
             b.setTextColor(color);
             b.setTextSize(size);
+            b.setShadowLayer(4, 0, 0, colShadow);
             b.setTypeface(null, android.graphics.Typeface.BOLD);
             return b;
         }
@@ -401,7 +456,7 @@ public class MainActivity extends AppCompatActivity {
         @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
             FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 170)); l.setPadding(6,6,6,6);
             TextView tv = new TextView(p.getContext()); tv.setId(android.R.id.text1); tv.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
-            tv.setGravity(Gravity.CENTER); tv.setTextColor(colText); tv.setTextSize(12); tv.setBackground(outline(colBorder));
+            tv.setGravity(Gravity.CENTER); tv.setTextColor(colText); tv.setTextSize(12); tv.setShadowLayer(6, 0, 0, colShadow); tv.setBackground(outline(colBorder));
             tv.setPadding(75, 0, 75, 0); tv.setMaxLines(3); tv.setEllipsize(TextUtils.TruncateAt.END); l.addView(tv);
             // слева: вверх / вниз
             l.addView(makeBtn(p, android.R.id.copy, "↑", colUp, 22, Gravity.TOP|Gravity.START, 0));
@@ -414,6 +469,12 @@ public class MainActivity extends AppCompatActivity {
 
         @Override public void onBindViewHolder(@NonNull VH h, int p) {
             h.txt.setText(channels.get(p)[0]);
+            boolean playing = channels.get(p)[1].equals(playingUrl);
+            h.txt.setBackground(outline(playing ? colUp : colBorder, playing ? 3 : 2));
+            h.txt.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) playChannel(pos);
+            });
             h.del.setOnClickListener(v -> {
                 int pos = h.getAbsoluteAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION) confirmDelete(pos);
@@ -490,6 +551,6 @@ public class MainActivity extends AppCompatActivity {
         playerView.requestFocus();
         if (channels != null && !channels.isEmpty()) playChannel(currentIdx);
     }
-    @Override protected void onStop() { super.onStop(); if (player != null) player.pause(); }
-    @Override protected void onDestroy() { super.onDestroy(); if (player != null) player.release(); }
+    @Override protected void onStop() { super.onStop(); switchHandler.removeCallbacksAndMessages(null); if (player != null) player.pause(); }
+    @Override protected void onDestroy() { super.onDestroy(); switchHandler.removeCallbacksAndMessages(null); hideHandler.removeCallbacksAndMessages(null); if (player != null) player.release(); }
 }
