@@ -99,7 +99,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn_sort).setOnClickListener(v -> openSortMode());
         findViewById(R.id.btn_done_sort).setOnClickListener(v -> closeSortMode());
         findViewById(R.id.btn_save).setOnClickListener(v -> fileSaver.launch("my_sorted_list.m3u"));
-        findViewById(R.id.btn_add).setOnClickListener(v -> showAddChannelDialog());
+        findViewById(R.id.btn_add).setOnClickListener(v -> showChannelDialog(-1));
 
         initGestures(findViewById(R.id.gesture_layer));
 
@@ -121,7 +121,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void hideStatus() { statusLayout.setVisibility(View.GONE); }
 
-    private void showAddChannelDialog() {
+    private boolean isValidUrl(String url) {
+        return url.startsWith("http://") || url.startsWith("https://")
+                || url.startsWith("rtsp://") || url.startsWith("rtmp://");
+    }
+
+    /** editPos = -1 -> добавление нового канала, иначе редактирование канала на этой позиции */
+    private void showChannelDialog(final int editPos) {
+        final boolean editing = editPos >= 0 && editPos < channels.size();
+
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
@@ -138,11 +146,17 @@ public class MainActivity extends AppCompatActivity {
         etUrl.setSingleLine(true);
         layout.addView(etUrl);
 
+        if (editing) {
+            etName.setText(channels.get(editPos)[0]);
+            etUrl.setText(channels.get(editPos)[1]);
+            etName.setSelection(etName.getText().length());
+        }
+
         final AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Добавить канал")
+                .setTitle(editing ? "Редактировать канал" : "Добавить канал")
                 .setView(layout)
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Добавить", null)
+                .setPositiveButton(editing ? "Сохранить" : "Добавить", null)
                 .create();
 
         dialog.setOnShowListener(di -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
@@ -152,26 +166,57 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "Заполни название и ссылку", Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (!url.startsWith("http://") && !url.startsWith("https://")
-                    && !url.startsWith("rtsp://") && !url.startsWith("rtmp://")) {
+            if (!isValidUrl(url)) {
                 Toast.makeText(this, "Ссылка должна начинаться с http(s)://", Toast.LENGTH_SHORT).show();
                 return;
             }
-            boolean wasEmpty = channels.isEmpty();
-            channels.add(new String[]{name, url});
-            updateListView();
-            // если открыт полноэкранный список — сразу показываем новый канал в сетке
-            if (sortingLayout.getVisibility() == View.VISIBLE && recyclerView.getAdapter() != null) {
-                recyclerView.getAdapter().notifyItemInserted(channels.size() - 1);
-                recyclerView.scrollToPosition(channels.size() - 1);
+
+            if (editing) {
+                String oldUrl = channels.get(editPos)[1];
+                channels.set(editPos, new String[]{name, url});
+                updateListView();
+                if (sortingLayout.getVisibility() == View.VISIBLE && recyclerView.getAdapter() != null) {
+                    recyclerView.getAdapter().notifyItemChanged(editPos);
+                }
+                autoSaveCache();
+                findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                Toast.makeText(this, "Канал изменён", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+                // если поменяли ссылку у играющего канала — перезапускаем его
+                if (editPos == currentIdx && !url.equals(oldUrl)) playChannel(currentIdx);
+            } else {
+                boolean wasEmpty = channels.isEmpty();
+                channels.add(new String[]{name, url});
+                updateListView();
+                // если открыт полноэкранный список — сразу показываем новый канал в сетке
+                if (sortingLayout.getVisibility() == View.VISIBLE && recyclerView.getAdapter() != null) {
+                    recyclerView.getAdapter().notifyItemInserted(channels.size() - 1);
+                    recyclerView.scrollToPosition(channels.size() - 1);
+                }
+                autoSaveCache();
+                findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                Toast.makeText(this, "Канал добавлен", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+                if (wasEmpty) playChannel(0);
             }
-            autoSaveCache();
-            findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
-            Toast.makeText(this, "Канал добавлен", Toast.LENGTH_SHORT).show();
-            dialog.dismiss();
-            if (wasEmpty) playChannel(0);
         }));
         dialog.show();
+    }
+
+    private void confirmDelete(final int pos) {
+        if (pos < 0 || pos >= channels.size()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Удалить канал?")
+                .setMessage(channels.get(pos)[0])
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Удалить", (d, w) -> {
+                    if (pos >= channels.size()) return;
+                    channels.remove(pos);
+                    if (recyclerView.getAdapter() != null) recyclerView.getAdapter().notifyItemRemoved(pos);
+                    autoSaveCache();
+                    findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                })
+                .show();
     }
 
     private void openSortMode() {
@@ -283,27 +328,72 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
-        class VH extends RecyclerView.ViewHolder { TextView txt; View del, up; VH(View v) { super(v); 
-            txt = v.findViewById(android.R.id.text1); del = v.findViewById(android.R.id.closeButton); up = v.findViewById(android.R.id.copy); 
+        class VH extends RecyclerView.ViewHolder { TextView txt; View del, up, down, edit; VH(View v) { super(v); 
+            txt = v.findViewById(android.R.id.text1);
+            del = v.findViewById(android.R.id.closeButton);
+            up = v.findViewById(android.R.id.copy);
+            down = v.findViewById(android.R.id.button1);
+            edit = v.findViewById(android.R.id.button2);
         } }
+
+        private TextView makeBtn(ViewGroup p, int id, String text, int color, int size, int gravity, int topMargin) {
+            TextView b = new TextView(p.getContext());
+            b.setId(id);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(70, 70);
+            lp.gravity = gravity;
+            lp.topMargin = topMargin;
+            b.setLayoutParams(lp);
+            b.setText(text);
+            b.setGravity(Gravity.CENTER);
+            b.setTextColor(color);
+            b.setTextSize(size);
+            b.setTypeface(null, android.graphics.Typeface.BOLD);
+            b.setBackgroundColor(0x44000000);
+            return b;
+        }
+
         @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
-            FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 150)); l.setPadding(5,5,5,5);
+            FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 170)); l.setPadding(5,5,5,5);
             TextView tv = new TextView(p.getContext()); tv.setId(android.R.id.text1); tv.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
             tv.setGravity(Gravity.CENTER); tv.setTextColor(-1); tv.setTextSize(12); tv.setBackgroundResource(android.R.drawable.btn_default); l.addView(tv);
-            TextView d = new TextView(p.getContext()); d.setId(android.R.id.closeButton); FrameLayout.LayoutParams dp = new FrameLayout.LayoutParams(70,70);
-            dp.gravity = Gravity.TOP|Gravity.END; d.setLayoutParams(dp); d.setText("X"); d.setGravity(Gravity.CENTER); d.setTextColor(0xFFFF0000);
-            d.setTextSize(16); d.setTypeface(null, android.graphics.Typeface.BOLD); d.setBackgroundColor(0x44000000); l.addView(d);
-            TextView u = new TextView(p.getContext()); u.setId(android.R.id.copy); FrameLayout.LayoutParams up = new FrameLayout.LayoutParams(70,70);
-            up.gravity = Gravity.TOP|Gravity.START; u.setLayoutParams(up); u.setText("↑"); u.setGravity(Gravity.CENTER); u.setTextColor(0xFF00FF00);
-            u.setTextSize(22); u.setTypeface(null, android.graphics.Typeface.BOLD); u.setBackgroundColor(0x44000000); l.addView(u);
+            // слева: вверх / вниз
+            l.addView(makeBtn(p, android.R.id.copy, "↑", 0xFF00FF00, 22, Gravity.TOP|Gravity.START, 0));
+            l.addView(makeBtn(p, android.R.id.button1, "↓", 0xFF00FF00, 22, Gravity.TOP|Gravity.START, 75));
+            // справа: удалить / редактировать
+            l.addView(makeBtn(p, android.R.id.closeButton, "X", 0xFFFF0000, 16, Gravity.TOP|Gravity.END, 0));
+            l.addView(makeBtn(p, android.R.id.button2, "✎", 0xFFFFC107, 20, Gravity.TOP|Gravity.END, 75));
             return new VH(l);
         }
+
         @Override public void onBindViewHolder(@NonNull VH h, int p) {
             h.txt.setText(channels.get(p)[0]);
-            h.del.setOnClickListener(v -> { int pos = h.getAbsoluteAdapterPosition(); channels.remove(pos); notifyItemRemoved(pos); autoSaveCache(); });
-            h.up.setOnClickListener(v -> { int pos = h.getAbsoluteAdapterPosition(); if (pos > 0) {
-                String[] ch = channels.remove(pos); channels.add(0, ch); notifyItemMoved(pos, 0); notifyItemRangeChanged(0, pos+1); autoSaveCache();
-            } });
+            h.del.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) confirmDelete(pos);
+            });
+            h.edit.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) showChannelDialog(pos);
+            });
+            h.up.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                if (pos > 0) {
+                    String[] ch = channels.remove(pos); channels.add(0, ch);
+                    notifyItemMoved(pos, 0); notifyItemRangeChanged(0, pos + 1);
+                    autoSaveCache();
+                    findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                }
+            });
+            h.down.setOnClickListener(v -> {
+                int pos = h.getAbsoluteAdapterPosition();
+                int last = channels.size() - 1;
+                if (pos != RecyclerView.NO_POSITION && pos < last) {
+                    String[] ch = channels.remove(pos); channels.add(ch);
+                    notifyItemMoved(pos, last); notifyItemRangeChanged(pos, last - pos + 1);
+                    autoSaveCache();
+                    findViewById(R.id.btn_save).setVisibility(View.VISIBLE);
+                }
+            });
         }
         @Override public int getItemCount() { return channels.size(); }
     }
