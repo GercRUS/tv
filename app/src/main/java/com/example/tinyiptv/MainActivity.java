@@ -3,7 +3,11 @@ package com.example.tinyiptv;
 import android.content.*;
 import android.net.Uri;
 import android.os.*;
+import android.content.res.Configuration;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.*;
 import android.widget.*;
 import androidx.activity.result.ActivityResultLauncher;
@@ -33,6 +37,9 @@ public class MainActivity extends AppCompatActivity {
     private RecyclerView recyclerView;
     private List<String[]> channels = new ArrayList<>();
     private int currentIdx = 0;
+    // Тема меню сортировки: 0 = как в системе, 1 = всегда тёмная, 2 = всегда светлая
+    private static final int THEME_MODE = 0;
+    private int colText, colBorder, colBg, colUp, colRed, colEdit;
     private SharedPreferences prefs;
     private final Handler hideHandler = new Handler(Looper.getMainLooper());
     private final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
@@ -120,6 +127,45 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void hideStatus() { statusLayout.setVisibility(View.GONE); }
+
+    private boolean isDarkTheme() {
+        if (THEME_MODE == 1) return true;
+        if (THEME_MODE == 2) return false;
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
+
+    /** Прозрачная плашка со скруглённой рамкой, без заливки */
+    private GradientDrawable outline(int color) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(Color.TRANSPARENT);
+        g.setCornerRadius(dp(10));
+        g.setStroke(dp(2), color);
+        return g;
+    }
+
+    private void styleButton(Button b) {
+        b.setBackground(outline(colBorder));
+        b.setTextColor(colText);
+        b.setStateListAnimator(null);
+        b.setPadding(dp(14), 0, dp(14), 0);
+    }
+
+    private void applyTheme() {
+        boolean dark = isDarkTheme();
+        colText = dark ? 0xFFFFFFFF : 0xFF000000;
+        colBorder = dark ? 0x99FFFFFF : 0x99000000;
+        colBg = dark ? 0xF2000000 : 0xF2FFFFFF;
+        colUp = dark ? 0xFF00FF00 : 0xFF2E7D32;
+        colRed = dark ? 0xFFFF4444 : 0xFFC62828;
+        colEdit = dark ? 0xFFFFC107 : 0xFFEF6C00;
+
+        sortingLayout.setBackgroundColor(colBg);
+        ((TextView) findViewById(R.id.sort_title)).setTextColor(colText);
+        styleButton((Button) findViewById(R.id.btn_add));
+        styleButton((Button) findViewById(R.id.btn_done_sort));
+    }
 
     private boolean isValidUrl(String url) {
         return url.startsWith("http://") || url.startsWith("https://")
@@ -220,6 +266,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void openSortMode() {
+        applyTheme();
         drawer.closeDrawers();
         sortingLayout.setVisibility(View.VISIBLE);
         recyclerView.setLayoutManager(new GridLayoutManager(this, 4));
@@ -348,20 +395,20 @@ public class MainActivity extends AppCompatActivity {
             b.setTextColor(color);
             b.setTextSize(size);
             b.setTypeface(null, android.graphics.Typeface.BOLD);
-            b.setBackgroundColor(0x44000000);
             return b;
         }
 
         @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
-            FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 170)); l.setPadding(5,5,5,5);
+            FrameLayout l = new FrameLayout(p.getContext()); l.setLayoutParams(new ViewGroup.LayoutParams(-1, 170)); l.setPadding(6,6,6,6);
             TextView tv = new TextView(p.getContext()); tv.setId(android.R.id.text1); tv.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
-            tv.setGravity(Gravity.CENTER); tv.setTextColor(-1); tv.setTextSize(12); tv.setBackgroundResource(android.R.drawable.btn_default); l.addView(tv);
+            tv.setGravity(Gravity.CENTER); tv.setTextColor(colText); tv.setTextSize(12); tv.setBackground(outline(colBorder));
+            tv.setPadding(75, 0, 75, 0); tv.setMaxLines(3); tv.setEllipsize(TextUtils.TruncateAt.END); l.addView(tv);
             // слева: вверх / вниз
-            l.addView(makeBtn(p, android.R.id.copy, "↑", 0xFF00FF00, 22, Gravity.TOP|Gravity.START, 0));
-            l.addView(makeBtn(p, android.R.id.button1, "↓", 0xFF00FF00, 22, Gravity.TOP|Gravity.START, 75));
+            l.addView(makeBtn(p, android.R.id.copy, "↑", colUp, 22, Gravity.TOP|Gravity.START, 0));
+            l.addView(makeBtn(p, android.R.id.button1, "↓", colUp, 22, Gravity.TOP|Gravity.START, 75));
             // справа: удалить / редактировать
-            l.addView(makeBtn(p, android.R.id.closeButton, "X", 0xFFFF0000, 16, Gravity.TOP|Gravity.END, 0));
-            l.addView(makeBtn(p, android.R.id.button2, "✎", 0xFFFFC107, 20, Gravity.TOP|Gravity.END, 75));
+            l.addView(makeBtn(p, android.R.id.closeButton, "X", colRed, 16, Gravity.TOP|Gravity.END, 0));
+            l.addView(makeBtn(p, android.R.id.button2, "✎", colEdit, 20, Gravity.TOP|Gravity.END, 75));
             return new VH(l);
         }
 
